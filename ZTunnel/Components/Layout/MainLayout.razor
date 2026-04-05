@@ -1,0 +1,58 @@
+@inherits LayoutComponentBase
+@inject SshTunnelService Tunnel
+@inject NavigationManager Nav
+@implements IDisposable
+
+<div class="zt-app">
+    <aside class="zt-sidebar">
+        <div class="zt-brand">
+            <div class="zt-logo">Z</div>
+            <div>
+                <div class="zt-brand-title">ZTunnel</div>
+                <div class="zt-brand-sub">SSH port forwarding</div>
+            </div>
+        </div>
+        <NavMenu />
+        <div class="zt-sidebar-footer">
+            <div class="zt-status-chip @(Tunnel.ConnectedCount > 0 ? "ok" : "")">
+                <span class="zt-dot"></span>
+                @Tunnel.ConnectedCount connected
+            </div>
+        </div>
+    </aside>
+    <main class="zt-main">
+        <header class="zt-topbar">
+            <div class="zt-topbar-title">@PageTitleFromUrl()</div>
+        </header>
+        <div class="zt-content">
+            @Body
+        </div>
+    </main>
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Tunnel.StateChanged += OnStateChanged;
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    private async void OnStateChanged() => await InvokeAsync(StateHasChanged);
+    private void OnLocationChanged(object? _, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs __)
+        => InvokeAsync(StateHasChanged);
+
+    private string PageTitleFromUrl()
+    {
+        var rel = Nav.ToBaseRelativePath(Nav.Uri).Trim('/').ToLowerInvariant();
+        if (rel == "") return "Dashboard";
+        if (rel.StartsWith("hosts")) return "SSH Hosts";
+        if (rel == "setup") return "Server Setup Guide";
+        return "ZTunnel";
+    }
+
+    public void Dispose()
+    {
+        Tunnel.StateChanged -= OnStateChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

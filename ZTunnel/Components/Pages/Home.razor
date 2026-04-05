@@ -1,0 +1,103 @@
+@page "/"
+@rendermode InteractiveServer
+@inject SshTunnelService Tunnel
+@inject TunnelConfigStore Store
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>ZTunnel · Dashboard</PageTitle>
+
+<div class="zt-grid">
+    <div class="zt-card zt-card-wide">
+        <div class="zt-card-header">
+            <h3>Overview</h3>
+            <div class="zt-actions">
+                <button class="btn btn-primary" @onclick='() => Nav.NavigateTo("hosts")'>Manage hosts</button>
+            </div>
+        </div>
+        <div class="zt-card-body">
+            <div class="zt-stat">
+                <span class="zt-stat-num">@Store.Hosts.Count</span>
+                <span class="zt-stat-label">configured hosts</span>
+            </div>
+            <div class="zt-stat">
+                <span class="zt-stat-num">@Tunnel.ConnectedCount</span>
+                <span class="zt-stat-label">connected</span>
+            </div>
+            <div class="zt-stat">
+                <span class="zt-stat-num">@TotalForwards</span>
+                <span class="zt-stat-label">total forwards</span>
+            </div>
+            <div class="zt-stat">
+                <span class="zt-stat-num">@RunningForwards</span>
+                <span class="zt-stat-label">running</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="zt-card zt-card-wide">
+        <div class="zt-card-header">
+            <h3>Hosts</h3>
+        </div>
+        <div class="zt-card-body">
+            @if (!Store.Hosts.Any())
+            {
+                <div class="zt-empty">
+                    <div class="zt-empty-icon">🖧</div>
+                    <div class="zt-empty-title">No SSH hosts configured yet</div>
+                    <div class="zt-empty-sub">Add one to start creating tunnels.</div>
+                    <button class="btn btn-primary mt-3" @onclick='() => Nav.NavigateTo("hosts")'>Add a host</button>
+                </div>
+            }
+            else
+            {
+                <table class="zt-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th><th>Endpoint</th><th>User</th>
+                            <th>Forwards</th><th>Status</th><th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var h in Store.Hosts)
+                        {
+                            var rt = Tunnel.GetRuntime(h.Id);
+                            <tr>
+                                <td>@h.Name</td>
+                                <td><code>@h.Host:@h.Port</code></td>
+                                <td>@h.Username</td>
+                                <td>@h.Forwards.Count(f => f.Enabled)/@h.Forwards.Count enabled</td>
+                                <td>
+                                    <span class="zt-status-chip @StatusOf(rt.Status)">
+                                        <span class="zt-dot"></span>@rt.Status
+                                    </span>
+                                </td>
+                                <td>
+                                    <a class="btn btn-sm btn-outline-secondary" href="hosts/@h.Id">Open</a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    protected override void OnInitialized() => Tunnel.StateChanged += OnChanged;
+    private async void OnChanged() => await InvokeAsync(StateHasChanged);
+
+    private int TotalForwards => Store.Hosts.Sum(h => h.Forwards.Count);
+    private int RunningForwards => Store.Hosts.Sum(h => h.Forwards.Count(f => f.Status == "Running"));
+
+    private string StatusOf(string s) => s switch
+    {
+        "Connected" => "ok",
+        "Connecting" or "Reconnecting" => "warn",
+        "Error" => "err",
+        _ => ""
+    };
+
+    public void Dispose() => Tunnel.StateChanged -= OnChanged;
+}

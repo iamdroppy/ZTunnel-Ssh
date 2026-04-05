@@ -1,0 +1,145 @@
+@page "/hosts/{HostId:guid}/forwards/new"
+@page "/hosts/{HostId:guid}/forwards/{FwdId:guid}"
+@rendermode InteractiveServer
+@inject TunnelConfigStore Store
+@inject SshTunnelService Tunnel
+@inject NavigationManager Nav
+
+<PageTitle>ZTunnel · @(_isNew ? "New Forward" : "Edit Forward")</PageTitle>
+
+@if (_host is null)
+{
+    <div class="zt-empty">
+        <div class="zt-empty-title">Host not found</div>
+        <a class="btn btn-primary mt-3" href="hosts">Back to hosts</a>
+    </div>
+}
+else if (_edit is null)
+{
+    <div class="zt-empty">
+        <div class="zt-empty-title">Forward not found</div>
+        <a class="btn btn-primary mt-3" href="@($"hosts/{HostId}")">Back to host</a>
+    </div>
+}
+else
+{
+    <div class="zt-toolbar">
+        <div class="zt-toolbar-left">
+            <a href="@($"hosts/{HostId}")" class="btn btn-sm btn-outline-secondary">← Back to @_host.Name</a>
+        </div>
+    </div>
+
+    <div class="zt-card zt-card-form">
+        <div class="zt-card-header"><h3>@(_isNew ? "Add port forward" : "Edit port forward")</h3></div>
+        <div class="zt-card-body">
+            <EditForm Model="_edit" OnValidSubmit="Save">
+                <DataAnnotationsValidator />
+
+                <div class="zt-form-group">
+                    <label>Name</label>
+                    <InputText @bind-Value="_edit.Name" class="form-control" placeholder="My database tunnel" />
+                </div>
+
+                <div class="zt-form-group">
+                    <label>Direction</label>
+                    <InputSelect @bind-Value="_edit.Direction" class="form-select">
+                        <option value="@ForwardDirection.Local">Local (-L) — listen on this machine</option>
+                        <option value="@ForwardDirection.Remote">Remote (-R) — listen on remote host</option>
+                    </InputSelect>
+                </div>
+
+                <div class="zt-section-title">
+                    @(_edit.Direction == ForwardDirection.Local ? "Bind on this machine" : "Bind on remote host")
+                </div>
+                <div class="zt-form-row">
+                    <div class="zt-form-group flex-grow">
+                        <label>Bound host</label>
+                        <InputText @bind-Value="_edit.BoundHost" class="form-control" placeholder="127.0.0.1" />
+                    </div>
+                    <div class="zt-form-group" style="max-width:160px">
+                        <label>Bound port</label>
+                        <InputNumber @bind-Value="_edit.BoundPort" class="form-control" />
+                    </div>
+                </div>
+
+                <div class="zt-section-title">
+                    @(_edit.Direction == ForwardDirection.Local ? "Forward to (from remote)" : "Forward to (on this machine)")
+                </div>
+                <div class="zt-form-row">
+                    <div class="zt-form-group flex-grow">
+                        <label>Destination host</label>
+                        <InputText @bind-Value="_edit.DestinationHost" class="form-control" placeholder="127.0.0.1" />
+                    </div>
+                    <div class="zt-form-group" style="max-width:160px">
+                        <label>Destination port</label>
+                        <InputNumber @bind-Value="_edit.DestinationPort" class="form-control" />
+                    </div>
+                </div>
+
+                <div class="zt-form-group">
+                    <label class="zt-switch">
+                        <InputCheckbox @bind-Value="_edit.Enabled" />
+                        <span>Enabled</span>
+                    </label>
+                </div>
+
+                <div class="zt-form-actions">
+                    <button type="submit" class="btn btn-primary">@(_isNew ? "Add forward" : "Save changes")</button>
+                    <a class="btn btn-outline-secondary" href="@($"hosts/{HostId}")">Cancel</a>
+                </div>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid HostId { get; set; }
+    [Parameter] public Guid? FwdId { get; set; }
+
+    private SshHost? _host;
+    private PortForward? _edit;
+    private bool _isNew;
+
+    protected override void OnParametersSet()
+    {
+        _host = Store.GetHost(HostId);
+        if (_host is null) return;
+
+        if (FwdId is null)
+        {
+            _isNew = true;
+            _edit = new PortForward();
+        }
+        else
+        {
+            _isNew = false;
+            var f = _host.Forwards.FirstOrDefault(x => x.Id == FwdId.Value);
+            _edit = f is null ? null : new PortForward
+            {
+                Id = f.Id, Name = f.Name, Direction = f.Direction,
+                BoundHost = f.BoundHost, BoundPort = f.BoundPort,
+                DestinationHost = f.DestinationHost, DestinationPort = f.DestinationPort,
+                Enabled = f.Enabled, Status = f.Status
+            };
+        }
+    }
+
+    private async Task Save()
+    {
+        if (_host is null || _edit is null) return;
+
+        if (_isNew)
+        {
+            Store.AddForward(_host.Id, _edit);
+            await Tunnel.AddLiveForwardAsync(_host.Id, _edit);
+        }
+        else
+        {
+            Store.UpdateForward(_host.Id, _edit);
+            await Tunnel.RemoveLiveForwardAsync(_host.Id, _edit.Id);
+            await Tunnel.AddLiveForwardAsync(_host.Id, _edit);
+        }
+
+        Nav.NavigateTo($"hosts/{_host.Id}");
+    }
+}

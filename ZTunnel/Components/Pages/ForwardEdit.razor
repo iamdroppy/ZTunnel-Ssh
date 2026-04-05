@@ -43,8 +43,8 @@ else
                 <div class="zt-form-group">
                     <label>Direction</label>
                     <InputSelect @bind-Value="_edit.Direction" class="form-select">
-                        <option value="@ForwardDirection.Local">Local (-L) — listen on this machine</option>
                         <option value="@ForwardDirection.Remote">Remote (-R) — listen on remote host</option>
+                        <option value="@ForwardDirection.Local">Local (-L) — listen on this machine</option>
                     </InputSelect>
                 </div>
 
@@ -54,7 +54,7 @@ else
                 <div class="zt-form-row">
                     <div class="zt-form-group flex-grow">
                         <label>Bound host</label>
-                        <InputText @bind-Value="_edit.BoundHost" class="form-control" placeholder="127.0.0.1" />
+                        <InputText @bind-Value="_edit.BoundHost" class="form-control" placeholder="@(_edit.Direction == ForwardDirection.Local ? "127.0.0.1" : "Remote Host")" />
                     </div>
                     <div class="zt-form-group" style="max-width:160px">
                         <label>Bound port</label>
@@ -68,7 +68,7 @@ else
                 <div class="zt-form-row">
                     <div class="zt-form-group flex-grow">
                         <label>Destination host</label>
-                        <InputText @bind-Value="_edit.DestinationHost" class="form-control" placeholder="127.0.0.1" />
+                        <InputText @bind-Value="_edit.DestinationHost" class="form-control" placeholder="@(_edit.Direction == ForwardDirection.Remote ? "127.0.0.1" : "Remote Host")" />
                     </div>
                     <div class="zt-form-group" style="max-width:160px">
                         <label>Destination port</label>

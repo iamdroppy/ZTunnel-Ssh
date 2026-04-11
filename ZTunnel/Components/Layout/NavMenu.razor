@@ -1,4 +1,4 @@
-<nav class="zt-nav">
+<nav class="zt-nav" @onclick="HandleClick">
     <NavLink class="zt-nav-item" href="" Match="NavLinkMatch.All">
         <span class="zt-nav-icon">⌂</span> Dashboard
     </NavLink>
@@ -9,3 +9,13 @@
         <span class="zt-nav-icon">📘</span> Server Setup Guide
     </NavLink>
 </nav>
+
+@code {
+    [Parameter] public EventCallback OnNavigate { get; set; }
+
+    private async Task HandleClick()
+    {
+        if (OnNavigate.HasDelegate)
+            await OnNavigate.InvokeAsync();
+    }
+}

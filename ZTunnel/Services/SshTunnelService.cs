@@ -17,9 +17,18 @@ public class HostRuntime
     public CancellationTokenSource Cts { get; set; } = new();
     public SemaphoreSlim Gate { get; } = new(1, 1);
 
+    /// <summary>
+    /// Fires whenever we detect a disconnect/error — lets the monitor loop
+    /// wake up instantly instead of waiting for the next poll tick.
+    /// </summary>
+    public SemaphoreSlim DropSignal { get; } = new(0, int.MaxValue);
+
     public string Status { get; set; } = "Disconnected";
     public string? LastError { get; set; }
     public DateTime? ConnectedSince { get; set; }
+
+    /// <summary>Should the monitor keep reconnecting if the session drops?</summary>
+    public bool KeepAlive { get; set; }
 
     public HostRuntime(Guid hostId) { HostId = hostId; }
 }
@@ -97,6 +106,35 @@ public class SshTunnelService : BackgroundService
         if (host == null || !host.IsValid) return;
 
         var rt = GetRuntime(hostId);
+        rt.KeepAlive = true;
+
+        // Start (or restart) a single monitor loop for this host. The loop
+        // owns the actual connect calls so reconnect attempts after a drop
+        // happen instantly and keep retrying until cancelled.
+        if (rt.Loop is null || rt.Loop.IsCompleted)
+        {
+            rt.Cts = new CancellationTokenSource();
+            var token = rt.Cts.Token;
+            rt.Loop = Task.Run(() => MonitorLoopAsync(rt.HostId, token));
+        }
+        else
+        {
+            // Loop already running — wake it up so it (re)attempts immediately.
+            try { rt.DropSignal.Release(); } catch { }
+        }
+
+        await Task.Yield();
+    }
+
+    /// <summary>
+    /// Performs the actual connect. Only called from inside MonitorLoopAsync.
+    /// </summary>
+    private async Task<bool> TryConnectOnceAsync(Guid hostId)
+    {
+        var host = _store.GetHost(hostId);
+        if (host == null || !host.IsValid) return false;
+
+        var rt = GetRuntime(hostId);
         await rt.Gate.WaitAsync();
         try
         {
@@ -113,12 +151,14 @@ public class SshTunnelService : BackgroundService
             };
 
             var client = new SshClient(info);
-            client.KeepAliveInterval = TimeSpan.FromSeconds(30);
+            client.KeepAliveInterval = TimeSpan.FromSeconds(15);
             client.ErrorOccurred += (_, args) =>
             {
                 rt.LastError = args.Exception.Message;
                 rt.Status = "Error";
                 RaiseChanged();
+                // Wake monitor loop immediately — do not wait for next poll.
+                try { rt.DropSignal.Release(); } catch { }
             };
 
             client.Connect();
@@ -130,10 +170,7 @@ public class SshTunnelService : BackgroundService
             rt.Status = "Connected";
             rt.ConnectedSince = DateTime.Now;
             RaiseChanged();
-
-            rt.Cts = new CancellationTokenSource();
-            var token = rt.Cts.Token;
-            rt.Loop = Task.Run(() => MonitorLoopAsync(rt.HostId, token));
+            return true;
         }
         catch (Exception ex)
         {
@@ -141,6 +178,7 @@ public class SshTunnelService : BackgroundService
             rt.Status = "Error";
             RaiseChanged();
             _logger.LogWarning(ex, "Failed to connect host {HostId}", hostId);
+            return false;
         }
         finally
         {
@@ -148,37 +186,100 @@ public class SshTunnelService : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Long-running per-host loop. Establishes the initial connection,
+    /// then polls every 200 ms (and wakes instantly on ErrorOccurred)
+    /// to reconnect the moment the session drops. Never gives up while
+    /// KeepAlive is true; uses short bounded backoff on repeated failure.
+    /// </summary>
     private async Task MonitorLoopAsync(Guid hostId, CancellationToken ct)
     {
         var rt = GetRuntime(hostId);
+        int consecutiveFailures = 0;
+
         try
         {
-            while (!ct.IsCancellationRequested && !_stopping.IsCancellationRequested)
+            // Initial connect attempt, retry quickly on failure.
+            while (!ct.IsCancellationRequested && !_stopping.IsCancellationRequested && rt.KeepAlive)
             {
-                await Task.Delay(2000, ct);
-                if (rt.Client is { IsConnected: false })
+                if (await TryConnectOnceAsync(hostId))
                 {
-                    rt.Status = "Reconnecting";
-                    rt.LastError = "Connection dropped";
-                    RaiseChanged();
-                    await Task.Delay(2000, ct);
-                    if (ct.IsCancellationRequested) return;
-                    _ = ConnectHostAsync(hostId);
-                    return;
+                    consecutiveFailures = 0;
+                    break;
                 }
+
+                consecutiveFailures++;
+                var delay = BackoffMs(consecutiveFailures);
+                rt.Status = "Reconnecting";
+                RaiseChanged();
+                try { await Task.Delay(delay, ct); } catch (OperationCanceledException) { return; }
+            }
+
+            // Steady-state: detect drops and reconnect immediately.
+            while (!ct.IsCancellationRequested && !_stopping.IsCancellationRequested && rt.KeepAlive)
+            {
+                // Wait up to 200ms for a drop signal, or just poll after 200ms.
+                try { await rt.DropSignal.WaitAsync(TimeSpan.FromMilliseconds(200), ct); }
+                catch (OperationCanceledException) { return; }
+
+                if (!rt.KeepAlive || ct.IsCancellationRequested) return;
+
+                var alive = rt.Client is { IsConnected: true };
+                if (alive) { consecutiveFailures = 0; continue; }
+
+                rt.Status = "Reconnecting";
+                rt.LastError ??= "Connection dropped";
+                RaiseChanged();
+
+                // Try to reconnect immediately, no artificial delay.
+                if (await TryConnectOnceAsync(hostId))
+                {
+                    consecutiveFailures = 0;
+                    continue;
+                }
+
+                consecutiveFailures++;
+                var delay = BackoffMs(consecutiveFailures);
+                try { await Task.Delay(delay, ct); } catch (OperationCanceledException) { return; }
             }
         }
         catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Monitor loop crashed for host {HostId}", hostId);
+            rt.Status = "Error";
+            rt.LastError = ex.Message;
+            RaiseChanged();
+        }
     }
+
+    /// <summary>
+    /// Bounded exponential-ish backoff in milliseconds. First retry is
+    /// effectively immediate; it caps at 5 seconds so reconnect stays snappy.
+    /// </summary>
+    private static int BackoffMs(int failures) => failures switch
+    {
+        <= 1 => 0,
+        2    => 250,
+        3    => 500,
+        4    => 1000,
+        5    => 2000,
+        _    => 5000,
+    };
 
     public async Task DisconnectHostAsync(Guid hostId)
     {
         var rt = GetRuntime(hostId);
         var host = _store.GetHost(hostId);
+
+        // Signal the monitor to stop reconnecting first.
+        rt.KeepAlive = false;
+        try { rt.Cts.Cancel(); } catch { }
+        try { rt.DropSignal.Release(); } catch { }
+
         await rt.Gate.WaitAsync();
         try
         {
-            rt.Cts.Cancel();
             DisconnectInternal(rt, host);
             rt.Status = "Disconnected";
             rt.ConnectedSince = null;
@@ -192,6 +293,24 @@ public class SshTunnelService : BackgroundService
 
     public async Task ReconnectHostAsync(Guid hostId)
     {
+        var rt = GetRuntime(hostId);
+        // Kick the existing monitor into a fresh attempt without tearing
+        // the loop down — this is what "reconnect immediately" means.
+        if (rt.Loop is not null && !rt.Loop.IsCompleted && rt.KeepAlive)
+        {
+            await rt.Gate.WaitAsync();
+            try
+            {
+                DisconnectInternal(rt, _store.GetHost(hostId));
+                rt.Status = "Reconnecting";
+                RaiseChanged();
+            }
+            finally { rt.Gate.Release(); }
+
+            try { rt.DropSignal.Release(); } catch { }
+            return;
+        }
+
         await DisconnectHostAsync(hostId);
         await ConnectHostAsync(hostId);
     }

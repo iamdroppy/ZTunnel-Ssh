@@ -4,7 +4,7 @@
 @implements IDisposable
 
 <div class="zt-app">
-    <aside class="zt-sidebar">
+    <aside class="zt-sidebar @(_sidebarOpen ? "open" : "")">
         <div class="zt-brand">
             <div class="zt-logo">Z</div>
             <div>
@@ -12,7 +12,7 @@
                 <div class="zt-brand-sub">SSH port forwarding</div>
             </div>
         </div>
-        <NavMenu />
+        <NavMenu OnNavigate="CloseSidebar" />
         <div class="zt-sidebar-footer">
             <div class="zt-status-chip @(Tunnel.ConnectedCount > 0 ? "ok" : "")">
                 <span class="zt-dot"></span>
@@ -22,7 +22,16 @@
     </aside>
     <main class="zt-main">
         <header class="zt-topbar">
-            <div class="zt-topbar-title">@PageTitleFromUrl()</div>
+            <div style="display:flex; align-items:center; gap:14px;">
+                <button class="zt-menu-toggle" type="button" @onclick="ToggleSidebar" aria-label="Open menu">☰</button>
+                <div class="zt-topbar-title">@PageTitleFromUrl()</div>
+            </div>
+            <div class="zt-topbar-right">
+                <span class="zt-status-chip @(Tunnel.ConnectedCount > 0 ? "ok" : "")">
+                    <span class="zt-dot"></span>
+                    @Tunnel.ConnectedCount active
+                </span>
+            </div>
         </header>
         <div class="zt-content">
             @Body
@@ -31,6 +40,8 @@
 </div>
 
 @code {
+    private bool _sidebarOpen;
+
     protected override void OnInitialized()
     {
         Tunnel.StateChanged += OnStateChanged;
@@ -39,7 +50,13 @@
 
     private async void OnStateChanged() => await InvokeAsync(StateHasChanged);
     private void OnLocationChanged(object? _, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs __)
-        => InvokeAsync(StateHasChanged);
+    {
+        _sidebarOpen = false;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void ToggleSidebar() => _sidebarOpen = !_sidebarOpen;
+    private void CloseSidebar() => _sidebarOpen = false;
 
     private string PageTitleFromUrl()
     {

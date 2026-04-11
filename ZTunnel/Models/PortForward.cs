@@ -12,7 +12,7 @@ public class PortForward
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "";
-    public ForwardDirection Direction { get; set; } = ForwardDirection.Local;
+    public ForwardDirection Direction { get; set; } = ForwardDirection.Remote;
 
     public string BoundHost { get; set; } = "127.0.0.1";
     public int BoundPort { get; set; } = 8080;

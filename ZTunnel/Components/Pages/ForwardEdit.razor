@@ -43,8 +43,8 @@ else
                 <div class="zt-form-group">
                     <label>Direction</label>
                     <InputSelect @bind-Value="_edit.Direction" class="form-select">
-                        <option value="@ForwardDirection.Remote">Remote (-R) — listen on remote host</option>
-                        <option value="@ForwardDirection.Local">Local (-L) — listen on this machine</option>
+                        <option value="@ForwardDirection.Remote" selected>Remote (-R) — listen local port on remote host</option>
+                        <option value="@ForwardDirection.Local">Local (-L) — listen on this machine the remote port</option>
                     </InputSelect>
                 </div>
 
@@ -63,7 +63,7 @@ else
                 </div>
 
                 <div class="zt-section-title">
-                    @(_edit.Direction == ForwardDirection.Local ? "Forward to (from remote)" : "Forward to (on this machine)")
+                    @(_edit.Direction == ForwardDirection.Local ? "Forward to (from remote, to a local port) - Brings a port from remote host locally" : "Forward to (from this machine) - Brings a local port to the forward (bound) host")
                 </div>
                 <div class="zt-form-row">
                     <div class="zt-form-group flex-grow">
@@ -109,6 +109,7 @@ else
         {
             _isNew = true;
             _edit = new PortForward();
+            _edit.BoundHost = _host.Host;
         }
         else
         {
@@ -121,6 +122,11 @@ else
                 DestinationHost = f.DestinationHost, DestinationPort = f.DestinationPort,
                 Enabled = f.Enabled, Status = f.Status
             };
+            
+            if (f == null && _edit is {} pf)
+            {
+                pf.BoundHost = _host.Host;
+            }
         }
     }
 

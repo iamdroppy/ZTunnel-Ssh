@@ -1,8 +1,10 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.11.0.0
+# Visual Studio Version 18
+VisualStudioVersion = 18.6.11723.189 insiders
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ZTunnel", "ZTunnel\ZTunnel.csproj", "{A1B2C3D4-E5F6-7890-ABCD-1234567890AB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ZTunnel.MAUI", "ZTunnel.MAUI\ZTunnel.MAUI.csproj", "{57026BB6-AEE3-4938-A484-63A431F04449}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -14,5 +16,16 @@ Global
 		{A1B2C3D4-E5F6-7890-ABCD-1234567890AB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A1B2C3D4-E5F6-7890-ABCD-1234567890AB}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A1B2C3D4-E5F6-7890-ABCD-1234567890AB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{57026BB6-AEE3-4938-A484-63A431F04449}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{57026BB6-AEE3-4938-A484-63A431F04449}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{57026BB6-AEE3-4938-A484-63A431F04449}.Debug|Any CPU.Deploy.0 = Debug|Any CPU
+		{57026BB6-AEE3-4938-A484-63A431F04449}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{57026BB6-AEE3-4938-A484-63A431F04449}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {B38D8680-1AF7-46FC-ACA4-AD927DF49B89}
 	EndGlobalSection
 EndGlobal

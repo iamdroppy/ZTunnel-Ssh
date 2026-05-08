@@ -1,0 +1,344 @@
+@page "/hosts/{Id:guid}"
+@inject TunnelConfigStore Store
+@inject SshTunnelService Tunnel
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>ZTunnel · @(_host?.Name ?? "Host")</PageTitle>
+
+@if (_host is null)
+{
+    <div class="zt-empty">
+        <div class="zt-empty-title">Host not found</div>
+        <a class="btn btn-primary mt-3" href="hosts">Back to hosts</a>
+    </div>
+}
+else
+{
+    var rt = Tunnel.GetRuntime(_host.Id);
+    var enabledCount = _host.Forwards.Count(f => f.Enabled);
+    var runningCount = _host.Forwards.Count(f => f.Status == "Running");
+    var errorCount = _host.Forwards.Count(f => f.Status == "Error");
+
+    <div class="zt-hero">
+        <div class="zt-hero-head">
+            <div class="zt-hero-eyebrow">
+                <a href="hosts" style="color:inherit; letter-spacing:inherit;">← All hosts</a>
+            </div>
+            <h1 class="zt-hero-title">@_host.Name</h1>
+            <div class="zt-host-meta">
+                <code>@(_host.IsValid ? Endpoint(_host) : "Not configured")</code>
+                <span class="zt-status-chip @StatusOf(rt.Status)">
+                    <span class="zt-dot"></span>@rt.Status
+                </span>
+                @if (rt.ConnectedSince.HasValue)
+                {
+                    <span class="text-muted">since @rt.ConnectedSince.Value.ToString("HH:mm:ss")</span>
+                }
+            </div>
+        </div>
+        <div class="zt-hero-right">
+            @if (Tunnel.IsConnected(_host.Id))
+            {
+                <button class="btn btn-outline-primary" type="button" @onclick="HandleReconnect">Reconnect SSH</button>
+                <button class="btn btn-outline-secondary" type="button" @onclick="HandleDisconnect">Disconnect</button>
+            }
+            else
+            {
+                <button class="btn btn-primary" type="button" @onclick="HandleConnect" disabled="@(!_host.IsValid)">Connect</button>
+            }
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(rt.LastError))
+    {
+        <div class="zt-alert err mb-3">⚠ @rt.LastError</div>
+    }
+
+    <div class="zt-tabs">
+        <button class="zt-tab @(_tab == "creds" ? "active" : "")" type="button" @onclick='() => SetTab("creds")'>Credentials</button>
+        <button class="zt-tab @(_tab == "fwds" ? "active" : "")" type="button" @onclick='() => SetTab("fwds")'>Port Forwards (@_host.Forwards.Count)</button>
+    </div>
+
+    @if (_tab == "creds")
+    {
+        <div class="zt-card zt-card-form mt-3">
+            <div class="zt-card-header"><h3>SSH Credentials</h3></div>
+            <div class="zt-card-body">
+                <EditForm Model="_host" OnValidSubmit="SaveCreds">
+                    <DataAnnotationsValidator />
+                    <div class="zt-form-group">
+                        <label>Display name</label>
+                        <InputText @bind-Value="_host.Name" class="form-control" />
+                    </div>
+                    <div class="zt-form-row">
+                        <div class="zt-form-group flex-grow">
+                            <label>Host / IP</label>
+                            <InputText @bind-Value="_host.Host" class="form-control" placeholder="ssh.example.com" />
+                        </div>
+                        <div class="zt-form-group" style="max-width:140px">
+                            <label>Port</label>
+                            <InputNumber @bind-Value="_host.Port" class="form-control" />
+                        </div>
+                    </div>
+                    <div class="zt-form-row">
+                        <div class="zt-form-group flex-grow">
+                            <label>Username</label>
+                            <InputText @bind-Value="_host.Username" class="form-control" />
+                        </div>
+                        <div class="zt-form-group flex-grow">
+                            <label>Password</label>
+                            <InputText type="password" @bind-Value="_host.Password" class="form-control" />
+                        </div>
+                    </div>
+                    <div class="zt-form-group">
+                        <label class="zt-switch">
+                            <InputCheckbox @bind-Value="_host.AutoConnect" />
+                            <span>Auto-connect on app start</span>
+                        </label>
+                    </div>
+                    <ValidationSummary />
+                    <div class="zt-form-actions">
+                        <button type="submit" class="btn btn-primary">Save &amp; Reconnect</button>
+                        <button type="button" class="btn btn-outline-secondary" @onclick="SaveOnly">Save only</button>
+                    </div>
+                    @if (_savedMsg is not null)
+                    {
+                        <div class="zt-alert ok mt-3">@_savedMsg</div>
+                    }
+                </EditForm>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="zt-toolbar mt-3">
+            <div class="zt-toolbar-left" style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+                <span class="zt-status-chip ok"><span class="zt-dot"></span>@runningCount running</span>
+                <span class="zt-status-chip"><span class="zt-dot"></span>@enabledCount enabled</span>
+                @if (errorCount > 0)
+                {
+                    <span class="zt-status-chip err"><span class="zt-dot"></span>@errorCount in error</span>
+                }
+            </div>
+            <div class="zt-toolbar-right">
+                <div class="zt-segmented" role="tablist" aria-label="View mode">
+                    <button type="button" class="@(_viewMode == "cards" ? "active" : "")" @onclick='() => SetView("cards")'>Cards</button>
+                    <button type="button" class="@(_viewMode == "compact" ? "active" : "")" @onclick='() => SetView("compact")'>Compact</button>
+                    <button type="button" class="@(_viewMode == "list" ? "active" : "")" @onclick='() => SetView("list")'>List</button>
+                </div>
+                <a class="btn btn-primary" href="@($"hosts/{_host.Id}/forwards/new")">+ Add forward</a>
+            </div>
+        </div>
+
+        @if (!_host.Forwards.Any())
+        {
+            <div class="zt-empty">
+                <div class="zt-empty-icon">⇄</div>
+                <div class="zt-empty-title">No port forwards yet</div>
+                <div class="zt-empty-sub">Add one to start tunneling traffic through this host.</div>
+                <a class="btn btn-primary mt-3" href="@($"hosts/{_host.Id}/forwards/new")">Add your first forward</a>
+            </div>
+        }
+        else if (_viewMode == "cards")
+        {
+            <div class="zt-fit-grid">
+                @foreach (var f in _host.Forwards)
+                {
+                    var fwd = f;
+                    <div class="zt-forward-card">
+                        <div class="zt-forward-head">
+                            <div style="min-width:0;">
+                                <div class="zt-forward-name">
+                                    @(string.IsNullOrWhiteSpace(fwd.Name) ? "Untitled forward" : fwd.Name)
+                                    <span class="zt-badge @(fwd.Direction == ForwardDirection.Local ? "local" : "remote")">
+                                        @(fwd.Direction == ForwardDirection.Local ? "Local -L" : "Remote -R")
+                                    </span>
+                                </div>
+                                <div class="zt-forward-route"><code>@fwd.DisplayRoute</code></div>
+                            </div>
+                            <div>
+                                <span class="zt-status-chip @StatusOf(fwd.Status)">
+                                    <span class="zt-dot"></span>@fwd.Status
+                                </span>
+                            </div>
+                        </div>
+                        @if (!string.IsNullOrEmpty(fwd.LastError))
+                        {
+                            <div class="zt-alert err mt-2">⚠ @fwd.LastError</div>
+                        }
+                        <div class="zt-forward-actions">
+                            <label class="zt-switch">
+                                <input type="checkbox" checked="@fwd.Enabled"
+                                       @onchange="@(e => ToggleEnabled(fwd, (bool)e.Value!))" />
+                                <span>Enabled</span>
+                            </label>
+                            <a class="btn btn-sm btn-outline-secondary" href="@($"hosts/{_host.Id}/forwards/{fwd.Id}")">Edit</a>
+                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => RemoveFwd(fwd)">Remove</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        else if (_viewMode == "compact")
+        {
+            <div class="zt-fit-grid">
+                @foreach (var f in _host.Forwards)
+                {
+                    var fwd = f;
+                    var dirClass = fwd.Direction == ForwardDirection.Local ? "local" : "remote";
+                    var dirLabel = fwd.Direction == ForwardDirection.Local ? "Local -L" : "Remote -R";
+                    <div class="zt-port-card @dirClass @(fwd.Enabled ? "" : "disabled")">
+                        <div class="zt-port-card-head">
+                            <span class="zt-port-card-name">@(string.IsNullOrWhiteSpace(fwd.Name) ? "Untitled forward" : fwd.Name)</span>
+                            <span class="zt-badge @dirClass">@dirLabel</span>
+                        </div>
+                        <div class="zt-port-card-route"><code>@fwd.DisplayRoute</code></div>
+                        <div class="zt-port-card-foot">
+                            <span class="zt-status-chip @StatusOf(fwd.Status)">
+                                <span class="zt-dot"></span>@fwd.Status
+                            </span>
+                            <label class="zt-switch" style="margin-left:auto;">
+                                <input type="checkbox" checked="@fwd.Enabled"
+                                       @onchange="@(e => ToggleEnabled(fwd, (bool)e.Value!))" />
+                                <span>On</span>
+                            </label>
+                            <a class="btn btn-sm btn-outline-secondary" href="@($"hosts/{_host.Id}/forwards/{fwd.Id}")">Edit</a>
+                        </div>
+                        @if (!string.IsNullOrEmpty(fwd.LastError))
+                        {
+                            <div class="zt-alert err" style="margin-top:6px; font-size:0.78rem; padding:8px 10px;">⚠ @fwd.LastError</div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="zt-port-table-wrap">
+                <div class="zt-table-wrap">
+                    <table class="zt-table">
+                        <thead>
+                            <tr>
+                                <th style="width:32px;"></th>
+                                <th>Name</th>
+                                <th>Dir</th>
+                                <th>Route</th>
+                                <th>Status</th>
+                                <th style="text-align:right;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var f in _host.Forwards)
+                            {
+                                var fwd = f;
+                                var dirClass = fwd.Direction == ForwardDirection.Local ? "local" : "remote";
+                                var dirShort = fwd.Direction == ForwardDirection.Local ? "L" : "R";
+                                <tr>
+                                    <td>
+                                        <label class="zt-switch" title="Enabled">
+                                            <input type="checkbox" checked="@fwd.Enabled"
+                                                   @onchange="@(e => ToggleEnabled(fwd, (bool)e.Value!))" />
+                                        </label>
+                                    </td>
+                                    <td>
+                                        <div style="font-weight:600;">@(string.IsNullOrWhiteSpace(fwd.Name) ? "Untitled" : fwd.Name)</div>
+                                        @if (!string.IsNullOrEmpty(fwd.LastError))
+                                        {
+                                            <div class="text-muted" style="font-size:0.74rem; color:#fca5a5!important;">@fwd.LastError</div>
+                                        }
+                                    </td>
+                                    <td><span class="zt-badge @dirClass">@dirShort</span></td>
+                                    <td><code>@fwd.DisplayRoute</code></td>
+                                    <td>
+                                        <span class="zt-status-chip @StatusOf(fwd.Status)">
+                                            <span class="zt-dot"></span>@fwd.Status
+                                        </span>
+                                    </td>
+                                    <td style="text-align:right;">
+                                        <span class="zt-row-actions">
+                                            <a class="btn btn-sm btn-outline-secondary" href="@($"hosts/{_host.Id}/forwards/{fwd.Id}")">Edit</a>
+                                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => RemoveFwd(fwd)">Remove</button>
+                                        </span>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    }
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private SshHost? _host;
+    private string _tab = "";
+    private string _viewMode = "cards";
+    private string? _savedMsg;
+
+    protected override void OnInitialized() => Tunnel.StateChanged += OnChanged;
+
+    protected override void OnParametersSet()
+    {
+        _host = Store.GetHost(Id);
+        if (_tab is not "creds" and not "fwds")
+            _tab = _host is { IsValid: true } ? "fwds" : "creds";
+    }
+
+    private async void OnChanged() => await InvokeAsync(StateHasChanged);
+
+    private void SetTab(string tab) => _tab = tab;
+    private void SetView(string m) => _viewMode = m;
+
+    private static string Endpoint(SshHost h) => string.Concat(h.Username, "@", h.Host, ":", h.Port);
+
+    private string StatusOf(string s) => s switch
+    {
+        "Connected" or "Running" => "ok",
+        "Connecting" or "Reconnecting" => "warn",
+        "Error" => "err",
+        _ => ""
+    };
+
+    private async Task HandleConnect() { if (_host != null) await Tunnel.ConnectHostAsync(_host.Id); }
+    private async Task HandleDisconnect() { if (_host != null) await Tunnel.DisconnectHostAsync(_host.Id); }
+    private async Task HandleReconnect() { if (_host != null) await Tunnel.ReconnectHostAsync(_host.Id); }
+
+    private async Task SaveCreds()
+    {
+        if (_host is null) return;
+        Store.UpdateHost(_host);
+        _savedMsg = "Saved. Reconnecting…";
+        await Tunnel.ReconnectHostAsync(_host.Id);
+    }
+
+    private void SaveOnly()
+    {
+        if (_host is null) return;
+        Store.UpdateHost(_host);
+        _savedMsg = "Saved.";
+    }
+
+    private async Task RemoveFwd(PortForward f)
+    {
+        if (_host is null) return;
+        await Tunnel.RemoveLiveForwardAsync(_host.Id, f.Id);
+        Store.RemoveForward(_host.Id, f.Id);
+    }
+
+    private async Task ToggleEnabled(PortForward f, bool value)
+    {
+        if (_host is null) return;
+        f.Enabled = value;
+        Store.UpdateForward(_host.Id, f);
+        if (value)
+            await Tunnel.AddLiveForwardAsync(_host.Id, f);
+        else
+            await Tunnel.RemoveLiveForwardAsync(_host.Id, f.Id);
+    }
+
+    public void Dispose() => Tunnel.StateChanged -= OnChanged;
+}

@@ -1,0 +1,94 @@
+@page "/setup"
+
+<PageTitle>ZTunnel · Setup Guide</PageTitle>
+
+<div class="zt-doc">
+        <h1>Setting up your SSH server for TCP tunneling</h1>
+        <p class="lead">
+            ZTunnel uses standard OpenSSH port forwarding. These steps show how to prepare a
+            Linux SSH server so that both <em>local</em> (-L) and <em>remote</em> (-R) TCP
+            forwarding work correctly.
+        </p>
+
+        <ol class="zt-steps">
+            <li>
+                <h3>1. Install OpenSSH server</h3>
+                <p>On a Debian/Ubuntu host:</p>
+                <pre><code>sudo apt update
+sudo apt install -y openssh-server
+sudo systemctl enable --now ssh</code></pre>
+                <p>On RHEL/Rocky/Alma:</p>
+                <pre><code>sudo dnf install -y openssh-server
+sudo systemctl enable --now sshd</code></pre>
+            </li>
+            <li>
+                <h3>2. Enable TCP forwarding in sshd_config</h3>
+                <p>Edit <code>/etc/ssh/sshd_config</code> and ensure these options are set:</p>
+                <pre><code>AllowTcpForwarding yes
+GatewayPorts yes            # only if you need -R to bind to non-loopback
+PermitOpen any              # or restrict to host:port pairs
+ClientAliveInterval 30
+ClientAliveCountMax 3</code></pre>
+                <p>
+                    <strong>Local forwarding (-L)</strong> only requires <code>AllowTcpForwarding yes</code>.<br />
+                    <strong>Remote forwarding (-R)</strong> that listens on external interfaces
+                    additionally needs <code>GatewayPorts yes</code> (or <code>clientspecified</code>).
+                </p>
+            </li>
+
+            <li>
+                <h3>3. Restart the SSH daemon</h3>
+                <pre><code>sudo systemctl restart ssh       # Debian/Ubuntu
+sudo systemctl restart sshd      # RHEL family</code></pre>
+            </li>
+
+            <li>
+                <h3>4. Open firewall ports</h3>
+                <pre><code>sudo ufw allow 22/tcp            # UFW
+# or
+sudo firewall-cmd --permanent --add-service=ssh
+sudo firewall-cmd --reload</code></pre>
+                <p>
+                    For remote (-R) forwards that bind to non-loopback, also open the chosen
+                    listening port on the server firewall.
+                </p>
+            </li>
+
+            <li>
+                <h3>5. Create or confirm a login user</h3>
+                <pre><code>sudo adduser tunneluser
+sudo usermod -aG sudo tunneluser   # optional</code></pre>
+                <p>
+                    Use this user's name and password in ZTunnel's
+                    <a href="credentials">SSH Credentials</a> page.
+                </p>
+            </li>
+
+            <li>
+                <h3>6. Test the tunnel from the command line</h3>
+                <p>Verify the server works before configuring ZTunnel:</p>
+                <pre><code># Local forward: localhost:8080 on your PC -> example.com:80 via server
+ssh -L 8080:example.com:80 tunneluser@your.server.com
+
+# Remote forward: server:9000 -> 127.0.0.1:3000 on your PC
+ssh -R 9000:127.0.0.1:3000 tunneluser@your.server.com</code></pre>
+            </li>
+
+            <li>
+                <h3>7. Configure ZTunnel</h3>
+                <ol>
+                    <li>Open <a href="credentials">SSH Credentials</a> and enter host, port, username, password.</li>
+                    <li>Click <strong>Save &amp; Reconnect</strong>.</li>
+                    <li>Open <a href="tunnels">Port Forwards</a> and add one or more forwards.</li>
+                    <li>Toggle them on/off live, or click <strong>Reconnect SSH</strong> to rebuild the session.</li>
+                </ol>
+            </li>
+        </ol>
+
+        <div class="zt-alert warn mt-4">
+            <strong>Security tip:</strong> Password-based SSH is convenient for tunneling but
+            public-key auth is safer. For production systems, restrict
+            <code>AllowTcpForwarding</code> per-user with <code>Match User</code> blocks and
+            pin <code>PermitOpen</code> to the exact host:port pairs you trust.
+        </div>
+    </div>

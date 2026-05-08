@@ -1,0 +1,161 @@
+@page "/"
+@inject SshTunnelService Tunnel
+@inject TunnelConfigStore Store
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>ZTunnel · Dashboard</PageTitle>
+
+<div class="zt-hero">
+    <div class="zt-hero-head">
+        <div class="zt-hero-eyebrow">Dashboard</div>
+        <h1 class="zt-hero-title">Welcome back to ZTunnel</h1>
+        <p class="zt-hero-sub">
+            Live overview of every SSH host and tunnel. Add hosts, toggle forwards
+            on the fly, and let auto-reconnect keep them online forever.
+        </p>
+    </div>
+    <div class="zt-hero-right">
+        <span class="zt-status-chip @(Tunnel.ConnectedCount > 0 ? "ok" : "")">
+            <span class="zt-dot"></span>@Tunnel.ConnectedCount active
+        </span>
+        <button class="btn btn-primary" @onclick='() => Nav.NavigateTo("hosts")'>Manage hosts</button>
+    </div>
+</div>
+
+<div class="zt-kpis">
+    <div class="zt-kpi">
+        <div class="zt-kpi-label">Hosts</div>
+        <div class="zt-kpi-num">@Store.Hosts.Count</div>
+        <div class="zt-kpi-foot">@Store.Hosts.Count(h => h.AutoConnect) auto-connect</div>
+    </div>
+    <div class="zt-kpi accent">
+        <div class="zt-kpi-label">Connected</div>
+        <div class="zt-kpi-num">@Tunnel.ConnectedCount</div>
+        <div class="zt-kpi-foot">Live SSH sessions</div>
+    </div>
+    <div class="zt-kpi">
+        <div class="zt-kpi-label">Forwards</div>
+        <div class="zt-kpi-num">@TotalForwards</div>
+        <div class="zt-kpi-foot">@EnabledForwards enabled</div>
+    </div>
+    <div class="zt-kpi ok">
+        <div class="zt-kpi-label">Running</div>
+        <div class="zt-kpi-num">@RunningForwards</div>
+        <div class="zt-kpi-foot">Of @EnabledForwards enabled</div>
+    </div>
+</div>
+
+<div class="zt-card zt-card-wide">
+    <div class="zt-card-header">
+        <h3>Hosts</h3>
+        <div class="zt-actions">
+            <a class="btn btn-sm btn-outline-secondary" href="hosts">Open hosts</a>
+        </div>
+    </div>
+    <div class="zt-card-body">
+        @if (!Store.Hosts.Any())
+        {
+            <div class="zt-empty">
+                <div class="zt-empty-icon">🖧</div>
+                <div class="zt-empty-title">No SSH hosts configured yet</div>
+                <div class="zt-empty-sub">Add one to start creating tunnels.</div>
+                <button class="btn btn-primary mt-3" @onclick='() => Nav.NavigateTo("hosts")'>Add a host</button>
+            </div>
+        }
+        else
+        {
+            <div class="zt-table-wrap">
+                <table class="zt-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Endpoint</th>
+                            <th>User</th>
+                            <th>Forwards</th>
+                            <th>Ports</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var h in Store.Hosts)
+                        {
+                            var rt = Tunnel.GetRuntime(h.Id);
+                            <tr>
+                                <td>
+                                    <div style="font-weight:700;">@h.Name</div>
+                                    @if (h.AutoConnect)
+                                    {
+                                        <span class="zt-badge local">AUTO</span>
+                                    }
+                                </td>
+                                <td><code>@h.Host:@h.Port</code></td>
+                                <td>@h.Username</td>
+                                <td>@h.Forwards.Count(f => f.Enabled) / @h.Forwards.Count enabled</td>
+                                <td>
+                                    @if (h.Forwards.Any())
+                                    {
+                                        <div class="zt-mini-rail" style="margin-top:0;">
+                                            @foreach (var f in h.Forwards.Take(6))
+                                            {
+                                                var dirClass = f.Direction == ForwardDirection.Local ? "local" : "remote";
+                                                var stateClass = !f.Enabled ? "off" : f.Status switch
+                                                {
+                                                    "Running" => "ok",
+                                                    "Error" => "err",
+                                                    _ => "warn"
+                                                };
+                                                var label = f.Direction == ForwardDirection.Local ? "L" : "R";
+                                                <span class="zt-port-pill @dirClass @stateClass" title="@f.DisplayRoute">
+                                                    <span class="zt-port-pill-dir">@label</span>
+                                                    <span class="zt-port-pill-dot"></span>
+                                                    <span>@f.BoundPort→@f.DestinationPort</span>
+                                                </span>
+                                            }
+                                            @if (h.Forwards.Count > 6)
+                                            {
+                                                <span class="zt-port-pill">+@(h.Forwards.Count - 6) more</span>
+                                            }
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted" style="font-size:0.78rem;">—</span>
+                                    }
+                                </td>
+                                <td>
+                                    <span class="zt-status-chip @StatusOf(rt.Status)">
+                                        <span class="zt-dot"></span>@rt.Status
+                                    </span>
+                                </td>
+                                <td>
+                                    <a class="btn btn-sm btn-outline-secondary" href="hosts/@h.Id">Open</a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    protected override void OnInitialized() => Tunnel.StateChanged += OnChanged;
+    private async void OnChanged() => await InvokeAsync(StateHasChanged);
+
+    private int TotalForwards => Store.Hosts.Sum(h => h.Forwards.Count);
+    private int EnabledForwards => Store.Hosts.Sum(h => h.Forwards.Count(f => f.Enabled));
+    private int RunningForwards => Store.Hosts.Sum(h => h.Forwards.Count(f => f.Status == "Running"));
+
+    private string StatusOf(string s) => s switch
+    {
+        "Connected" => "ok",
+        "Connecting" or "Reconnecting" => "warn",
+        "Error" => "err",
+        _ => ""
+    };
+
+    public void Dispose() => Tunnel.StateChanged -= OnChanged;
+}
